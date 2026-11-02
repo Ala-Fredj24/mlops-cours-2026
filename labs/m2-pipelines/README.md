@@ -35,6 +35,42 @@ debugging.*
 >   avec la même image.
 > - Un rapport comparatif (1 page) : KFP vs Airflow sur ce cas d'usage.
 
+## Les notions du lab en 10 minutes (à lire avant de commencer)
+
+Au Lab 1, vos scripts tournaient un par un, lancés par DVC sur votre VM. Ici, on confie leur
+enchaînement à un **orchestrateur** : un outil qui lance chaque étape au bon moment, dans le
+cluster, réessaie en cas d'erreur et garde la trace de chaque exécution.
+
+![Le Lab 2 en un coup d'œil](img/00-lab2-flux.png)
+
+Un pipeline se décrit comme un **DAG** (graphe orienté sans boucle) : des étapes et les flèches
+qui disent qui dépend de qui. L'orchestrateur en déduit ce qu'il peut lancer en parallèle et ce
+qu'il doit relancer après une panne.
+
+![Séquence ou DAG](img/01-dag.png)
+
+**Kubeflow Pipelines (KFP)** est l'orchestrateur du cours. Vous décrivez le pipeline en Python,
+KFP le compile en YAML, puis chaque étape tourne dans **son propre pod**, à partir d'une
+**image « projet »** qui contient le code du Lab 1. Les fichiers passent d'une étape à l'autre
+sous forme d'**artefacts typés** (Dataset, Model, Metrics), rangés par KFP dans son stockage.
+
+![Kubeflow Pipelines : une étape = un pod](img/02-kfp-pods.png)
+
+**Airflow** est l'orchestrateur le plus répandu pour les pipelines de données. À l'étape 7, il
+lance les mêmes étapes avec la même image, pour comparer les deux outils.
+
+![Même code, deux orchestrateurs](img/03-kfp-airflow.png)
+
+| Mot | En une phrase |
+|---|---|
+| Orchestrateur | L'outil qui lance les étapes d'un pipeline, dans l'ordre, et les surveille. |
+| DAG | Le graphe des étapes et de leurs dépendances, sans boucle. |
+| Composant | Une étape du pipeline KFP : une fonction Python décorée par `@dsl.component`, qui tourne dans un pod. |
+| Artefact | Un fichier produit par une étape et transmis à la suivante (données, modèle, métriques). |
+| Image « projet » | L'image Docker qui contient votre code ; tous les composants partent d'elle. |
+| Cache | KFP ne relance pas une étape dont les entrées n'ont pas changé : il réutilise son résultat. |
+| Retry | Relancer automatiquement une étape qui a échoué (une panne réseau, par exemple). |
+
 ## Architecture cible
 
 ```text
@@ -82,7 +118,25 @@ debugging.*
 > MLflow, versions 1 à 3 de `scoring-model`). On travaille dans votre fork,
 > `~/mlops-cours-2026`, sur le cluster `mlops-lab` du Lab 0 : on ne le recrée **pas**.
 
-Au début de chaque séance :
+> [!IMPORTANT]
+> **Une fois, avant ce lab (Windows, VM du cours) : passer la VM à 12 Go**
+> Kubeflow et Airflow demandent plus de mémoire que les Labs 0 et 1 : il faut un PC de 16 Go et
+> une VM de 12 Go. Dans **PowerShell**, dossier `infra\vagrant` du Lab 0 :
+>
+> ```powershell
+> Invoke-WebRequest https://raw.githubusercontent.com/firaskhl/mlops-cours-2026/main/infra/vagrant/Vagrantfile -OutFile Vagrantfile
+> setx VM_MEMORY 12288
+> $env:VM_MEMORY=12288
+> vagrant reload
+> ```
+>
+> La première ligne récupère le nouveau `Vagrantfile`, qui ouvre aussi le port 8081 (UI Airflow,
+> étape 7) vers Windows. `setx` garde les 12 Go pour les prochaines fenêtres PowerShell.
+> `vagrant reload` redémarre la VM (2 à 3 min) ; dans la VM, `free -h` doit afficher environ
+> 11 Go au total. PC de 8 Go : travaillez sur le poste de votre binôme (voir le Lab 0).
+
+Au début de chaque séance, sous Windows, démarrez d'abord la VM dans **PowerShell**, dossier
+`infra\vagrant` : `vagrant up`, puis `vagrant ssh`. Puis, dans la VM :
 
 ```bash
 cd ~/mlops-cours-2026
@@ -91,6 +145,10 @@ make pf                    # port-forwards S3 :8333 et MLflow :5000
 source .venv/bin/activate  # venv du cours
 set -a && source .env && set +a
 ```
+
+Si `kubectl get nodes` échoue après le redémarrage de la VM :
+`docker start mlops-lab-control-plane mlops-lab-worker mlops-lab-worker2 kind-registry`, attendez
+une minute et recommencez.
 
 Dans un **nouveau terminal** de la même séance, seules les deux dernières lignes sont
 nécessaires (après `cd ~/mlops-cours-2026`) : les port-forwards tournent déjà en arrière-plan.
@@ -106,6 +164,13 @@ cd ~/mlops-cours-2026
 git switch main && git pull
 git switch -c lab/m2-pipelines
 ```
+
+> [!WARNING]
+> **Repo créé par fork : vérifiez la cible de la pull request**
+> Sur un fork, GitHub propose par défaut d'ouvrir la pull request **vers le repo du cours**
+> (`firaskhl/mlops-cours-2026`). Au moment de la créer, choisissez **base repository : votre
+> repo** (`VOTRE_USER/mlops-cours-2026`, branche `main`). Une PR ouverte par erreur vers le repo
+> du cours est fermée sans être fusionnée : rouvrez-la vers votre repo.
 
 ## Convention de notation
 
@@ -1680,6 +1745,21 @@ fusionnez, puis vous revenez sur `main` : `git switch main && git pull`.
 > sont ignorés ; `dvc.lock` reste modifié en local, voir Lab 1) : `git status` ne doit montrer
 > que `dvc.lock`.
 
+## Lien avec le mini-projet
+
+- **Jalon J0, à la fin de cette séance** : `make check-m0` et `make check-m1` verts,
+  organisation du binôme (option A ou B) déclarée en tête du README, données versionnées,
+  runs dans MLflow. Pré-contrôle : `make check-m10 JALON=j0`, puis posez le tag :
+  `git switch main && git pull && git tag -a j0 -m "J0 Setup" && git push origin j0`.
+  J0 n'est pas noté : il sert à repérer tôt ce qui bloque.
+- **Dataset libre** : dernière limite de validation au jalon J0.
+- **Journal de bord** (`docs/journal.md`) : une entrée pour cette séance.
+- **Extensions** : lisez le catalogue du guide du mini-projet (`labs/m10-capstone/README.md`,
+  section « L'extension personnelle ») ; la déclaration se fait au plus tard à la fin de la
+  séance du Module 4.
+- **ADR conseillé** : le choix de l'orchestrateur (KFP ou Airflow) pour votre projet, en
+  reprenant les arguments de votre rapport comparatif.
+
 ## Checklist de validation
 
 | # | Élément | Test | Résultat attendu | OK |
@@ -1714,7 +1794,9 @@ fusionnez, puis vous revenez sur `main` : `git switch main && git pull`.
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
-| KFP pods bloqués en `Pending` | Ressources K8s insuffisantes. | Augmenter la RAM de Docker Desktop à 8 Go. Arrêter Airflow (`docker compose down`) et les autres pods inutiles. |
+| KFP pods bloqués en `Pending` | Ressources K8s insuffisantes. | VM du cours : passer à 12 Go (encadré du début du lab ; `free -h` dans la VM). Docker Desktop : 8 Go minimum. Arrêter Airflow (`docker compose down`) et les autres pods inutiles. |
+| UI Airflow (`localhost:8081`) inaccessible depuis Windows | Ancien `Vagrantfile`, sans le port 8081. | Récupérer le nouveau `Vagrantfile` puis `vagrant reload` (encadré du début du lab). |
+| La VM repart avec 8 Go après `vagrant up` | `VM_MEMORY` défini seulement dans la fenêtre PowerShell précédente. | `setx VM_MEMORY 12288`, nouvelle fenêtre PowerShell, `vagrant reload`. |
 | `metadata-grpc-deployment` en `CrashLoopBackOff` (`exec format error`) sur Mac Apple Silicon | Image ML Metadata publiée pour amd64 seulement. | Docker Desktop : activer « Use Rosetta for x86_64/amd64 emulation », puis `kubectl -n kubeflow rollout restart deploy/metadata-grpc-deployment`. |
 | `kubectl apply -k github.com/...` : erreur de clonage | Pas de `git` ou pas d'accès à GitHub. | Installer `git` ; vérifier le proxy de l'école ; relancer `make kfp` (idempotent). |
 | Pod de step en `ImagePullBackOff` sur `localhost:5001/scoring-pipeline:…` | Image non poussée, ou tag différent de `PIPELINE_IMAGE`. | `docker push localhost:5001/scoring-pipeline:1.0.0` ; `curl localhost:5001/v2/scoring-pipeline/tags/list` ; comparer avec `components.py`. |

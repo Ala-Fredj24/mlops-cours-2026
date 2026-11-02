@@ -31,8 +31,9 @@ vagrant up                 # 15 à 25 min la première fois (box + paquets + out
 vagrant ssh                # vous êtes dans la VM : utilisateur vagrant, Ubuntu 24.04
 ```
 
-PC de 8 Go : `$env:VM_MEMORY=6144; vagrant up`. À partir du Lab 2 (PC de 16 Go) :
-`$env:VM_MEMORY=12288; vagrant reload`.
+PC de 8 Go : `$env:VM_MEMORY=6144; vagrant up`. À partir du Lab 2 (PC de 16 Go), une fois :
+`setx VM_MEMORY 12288; $env:VM_MEMORY=12288; vagrant reload`. `setx` garde le réglage pour les
+prochaines fenêtres PowerShell : sans lui, le `vagrant up` suivant repartirait avec 8 Go.
 
 > **Sortie attendue de `vagrant up`** : la fin du provisioning Ansible affiche les versions
 > (Docker 29.x, Docker Compose v2.x, kubectl v1.37.1, helm v4.3.0, k9s v0.51.0, kind v0.33.0,

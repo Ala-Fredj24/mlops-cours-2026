@@ -45,6 +45,9 @@ Vagrant.configure("2") do |config|
   # Passerelle Kourier / KServe (Lab 5) : publiee directement par kind (hostPort 30080)
   config.vm.network "forwarded_port", guest: 30080, host: 30080,
                     host_ip: "127.0.0.1", auto_correct: true
+  # UI Airflow (Lab 2) : publiee directement par Docker Compose dans la VM (0.0.0.0:8081)
+  config.vm.network "forwarded_port", guest: 8081, host: 8081,
+                    host_ip: "127.0.0.1", auto_correct: true
 
   # Dossier infra/ du repo, en lecture seule : le playbook y lit versions.env
   config.vm.synced_folder "..", "/opt/mlops-infra", mount_options: ["ro"]
