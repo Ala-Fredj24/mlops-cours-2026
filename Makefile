@@ -102,6 +102,9 @@ pipeline-image: ## Lab 2+ — construit et pousse l'image du pipeline (tag de pi
 	IMAGE=$$(uv run --no-sync python -c "from pipelines.components import PIPELINE_IMAGE as i; print(i)")
 	docker build -f pipelines/Dockerfile -t "$$IMAGE" .
 	docker push "$$IMAGE"
+	# Copie aussi l'image dans chaque nœud kind : sinon chaque nœud la retélécharge
+	# depuis le registry (plusieurs minutes par nœud au premier run).
+	kind load docker-image --name $(KIND_CLUSTER_NAME) "$$IMAGE" || true
 
 pf-monitoring: ## Lab 7 — port-forwards Grafana, Prometheus, Alertmanager
 	./infra/monitoring/port-forward.sh

@@ -1137,7 +1137,7 @@ kubectl -n kubeflow get pods -w | grep scoring
 > run = client.create_run_from_pipeline_package(
 >     "scoring_pipeline.yaml", experiment_name="scoring", run_name="scoring-cli"
 > )
-> print(client.wait_for_run_completion(run.run_id, timeout=1800).state)
+> print(client.wait_for_run_completion(run.run_id, timeout=3600).state)
 > EOF
 > ```
 
@@ -1735,7 +1735,7 @@ fusionnez, puis vous revenez sur `main` : `git switch main && git pull`.
 > for i in (1, 2):  # le second run sert les premières étapes depuis le cache (étape 6.2)
 >     run = client.create_run_from_pipeline_package(
 >         "scoring_pipeline.yaml", experiment_name="scoring", run_name=f"rattrapage-{i}")
->     print(client.wait_for_run_completion(run.run_id, timeout=1800).state)
+>     print(client.wait_for_run_completion(run.run_id, timeout=3600).state)
 > EOF
 > make airflow                       # puis déclencher scoring_dag (étape 7.3)
 > make check-m2
@@ -1800,6 +1800,8 @@ fusionnez, puis vous revenez sur `main` : `git switch main && git pull`.
 | `metadata-grpc-deployment` en `CrashLoopBackOff` (`exec format error`) sur Mac Apple Silicon | Image ML Metadata publiée pour amd64 seulement. | Docker Desktop : activer « Use Rosetta for x86_64/amd64 emulation », puis `kubectl -n kubeflow rollout restart deploy/metadata-grpc-deployment`. |
 | `kubectl apply -k github.com/...` : erreur de clonage | Pas de `git` ou pas d'accès à GitHub. | Installer `git` ; vérifier le proxy de l'école ; relancer `make kfp` (idempotent). |
 | Pod de step en `ImagePullBackOff` sur `localhost:5001/scoring-pipeline:…` | Image non poussée, ou tag différent de `PIPELINE_IMAGE`. | `docker push localhost:5001/scoring-pipeline:1.0.0` ; `curl localhost:5001/v2/scoring-pipeline/tags/list` ; comparer avec `components.py`. |
+| `TimeoutError: Run timeout` alors que le run finit en vert dans l'UI | Premier run lent : chaque nœud télécharge l'image du pipeline (environ 250 Mo) et l'image `kfp-launcher` ; si des nœuds sont passés `NotReady`, les pods attendent aussi. | `kubectl -n kubeflow get workflows` : si `Succeeded`, le pipeline est bon. Relancer `make pipeline-image` (il copie maintenant l'image dans les nœuds), puis relancer le run : le suivant est bien plus rapide. |
+| Nœuds `NotReady` par moments, pods Kubeflow qui redémarrent ; `uptime` affiche une charge très élevée (plus de 20) alors que `top` montre le CPU presque inactif | Le disque de la VM sature (premier déploiement de Kubeflow : une quinzaine d'images à décompresser), souvent aggravé par l'antivirus Windows qui analyse le disque de la VM. | Attendre que la charge (`uptime`, 1er chiffre) redescende sous 4 et que `kubectl get nodes` montre 3 nœuds `Ready`, puis relancer. Si cela revient : exclure le dossier `C:\Users\<vous>\VirtualBox VMs` de l'analyse Windows Defender. Conseil : lancer `make kfp` chez soi la veille du lab. |
 | Pod `train-model` en `Pending` (*Insufficient cpu*) | Une limit sans request vaut request : 2 CPU demandés. | Garder `set_cpu_request("500m")` ou baisser `set_cpu_limit`. |
 | Step `OOMKilled` | Limite mémoire trop basse pour votre dataset. | Augmenter le `set_memory_limit` du step (étape 6). |
 | `ModuleNotFoundError: No module named 'src'` (dans un pod) | Image construite sans `src/`, ou mauvais `PYTHONPATH`. | Vérifier le Dockerfile et `Dockerfile.dockerignore`, reconstruire avec un nouveau tag. |
