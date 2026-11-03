@@ -47,7 +47,8 @@ secret=$("${K[@]}" -n storage get secret s3-credentials \
 
 echo "==> 5/5 Démarrage (premier lancement : 3 à 5 min)"
 docker compose up airflow-init
-docker compose up -d
+# 2e essai : sur un poste chargé, l'API peut être déclarée « unhealthy » trop tôt
+docker compose up -d || { echo "    API Airflow lente : 2e essai dans 30 s"; sleep 30; docker compose up -d; }
 for _ in $(seq 1 60); do
   if curl -sf http://localhost:8081/api/v2/monitor/health >/dev/null; then
     break
