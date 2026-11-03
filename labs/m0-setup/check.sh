@@ -27,7 +27,8 @@ TOTAL=0
 t() {
   local secs=$1
   shift
-  if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"; else "$@"; fi
+  # -k 10 : SIGKILL 10 s après le délai si la commande ignore SIGTERM (docker compose exec)
+  if command -v timeout >/dev/null 2>&1; then timeout -k 10 "$secs" "$@"; else "$@"; fi
 }
 
 kc() { t 15 kubectl --context "$CTX" --request-timeout=10s "$@"; }

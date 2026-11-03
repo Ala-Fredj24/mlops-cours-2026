@@ -36,7 +36,8 @@ PF_PID=""
 t() {
   local secs=$1
   shift
-  if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"; else "$@"; fi
+  # -k 10 : SIGKILL 10 s après le délai si la commande ignore SIGTERM (docker compose exec)
+  if command -v timeout >/dev/null 2>&1; then timeout -k 10 "$secs" "$@"; else "$@"; fi
 }
 k() { t 30 kubectl "$@"; }
 py() { t 120 uv run --no-sync python "$@"; }
