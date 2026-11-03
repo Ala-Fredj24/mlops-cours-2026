@@ -1093,6 +1093,14 @@ EOF
 
 ## Étape 4/9 — Uploader et exécuter le pipeline sur le cluster (15 min)
 
+> [!IMPORTANT]
+> **Kubeflow et Airflow, pas en même temps**
+> Dans la VM de 12 Go, les runs Kubeflow et Airflow ensemble saturent la mémoire et le disque :
+> les runs deviennent très lents (plus d'une heure). Si Airflow tourne encore (`docker ps | grep
+> airflow`), arrêtez-le pendant les étapes 4 à 6 : `(cd infra/airflow && docker compose down)`.
+> Vous le relancerez à l'étape 7 avec `make airflow`, et vous pourrez alors arrêter Kubeflow
+> le temps des runs Airflow si la VM rame.
+
 ### 4.1 Upload via l'UI KFP
 
 - Ouvrez l'UI KFP sur `http://localhost:8080`.
@@ -1802,6 +1810,7 @@ fusionnez, puis vous revenez sur `main` : `git switch main && git pull`.
 | Pod de step en `ImagePullBackOff` sur `localhost:5001/scoring-pipeline:…` | Image non poussée, ou tag différent de `PIPELINE_IMAGE`. | `docker push localhost:5001/scoring-pipeline:1.0.0` ; `curl localhost:5001/v2/scoring-pipeline/tags/list` ; comparer avec `components.py`. |
 | `Connection reset by peer` ou `Connection refused` sur `localhost:8080` (UI ou SDK) | Le `kubectl port-forward` s'est arrêté : pod de l'UI redémarré ou VM très chargée. Le run, lui, continue dans le cluster. | `make kfp-ui` pour relancer le port-forward, puis recharger la page ; `kubectl -n kubeflow get workflows` pour voir l'état du run. |
 | `make airflow` : `dependency failed to start: container airflow-airflow-apiserver-1 is unhealthy` | L'API Airflow démarre trop lentement (VM chargée, Kubeflow qui tourne à côté, mémoire juste). | `cd infra/airflow && docker compose logs --tail=50 airflow-apiserver` pour voir l'erreur ; `free -h` ; relancer `make airflow` (l'override du cours laisse maintenant 5 min à l'API pour démarrer). |
+| Run Kubeflow qui dure plus d'une heure ; `uptime` très élevé ; `free -h` montre du swap utilisé | Airflow tourne en même temps que Kubeflow : la VM manque de mémoire, échange avec le disque (swap) et tout ralentit. | `(cd infra/airflow && docker compose down)` pendant les runs Kubeflow (encadré de l'étape 4) ; relancer Airflow seulement à l'étape 7. |
 | `TimeoutError: Run timeout` alors que le run finit en vert dans l'UI | Premier run lent : chaque nœud télécharge l'image du pipeline (environ 250 Mo) et l'image `kfp-launcher` ; si des nœuds sont passés `NotReady`, les pods attendent aussi. | `kubectl -n kubeflow get workflows` : si `Succeeded`, le pipeline est bon. Relancer `make pipeline-image` (il copie maintenant l'image dans les nœuds), puis relancer le run : le suivant est bien plus rapide. |
 | Nœuds `NotReady` par moments, pods Kubeflow qui redémarrent ; `uptime` affiche une charge très élevée (plus de 20) alors que `top` montre le CPU presque inactif | Le disque de la VM sature (premier déploiement de Kubeflow : une quinzaine d'images à décompresser), souvent aggravé par l'antivirus Windows qui analyse le disque de la VM. | Attendre que la charge (`uptime`, 1er chiffre) redescende sous 4 et que `kubectl get nodes` montre 3 nœuds `Ready`, puis relancer. Si cela revient : exclure le dossier `C:\Users\<vous>\VirtualBox VMs` de l'analyse Windows Defender. Conseil : lancer `make kfp` chez soi la veille du lab. |
 | Pod `train-model` en `Pending` (*Insufficient cpu*) | Une limit sans request vaut request : 2 CPU demandés. | Garder `set_cpu_request("500m")` ou baisser `set_cpu_limit`. |
