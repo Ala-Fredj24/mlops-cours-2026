@@ -61,6 +61,10 @@ pf: ## Port-forwards : S3 :8333, filer :8888, MLflow :5000 (en arrière-plan)
 	mkdir -p $(PF_LOG)
 	pkill -f "^kubectl .*port-forward svc/s3 8333" || true
 	pkill -f "^kubectl .*port-forward svc/mlflow 5000" || true
+	# Après un redémarrage de la VM, attendre que SeaweedFS et MLflow soient prêts :
+	# un port-forward lancé trop tôt s'arrête (« lost connection to pod »).
+	kubectl --context $(KCTX) -n storage rollout status deploy/seaweedfs --timeout=300s || true
+	kubectl --context $(KCTX) -n mlflow rollout status deploy/mlflow --timeout=300s || true
 	nohup kubectl --context $(KCTX) -n storage port-forward svc/s3 8333:8333 8888:8888 >$(PF_LOG)/s3.log 2>&1 &
 	nohup kubectl --context $(KCTX) -n mlflow  port-forward svc/mlflow 5000:5000      >$(PF_LOG)/mlflow.log 2>&1 &
 	sleep 3
