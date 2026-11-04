@@ -265,22 +265,38 @@ EOF
 }
 airflow_up() { t 20 "${AF[@]}" ps --services --status running 2>/dev/null | grep -qx airflow-scheduler; }
 airflow_live_ok() {
+  # Sorties complètes (pas seulement la dernière ligne) : selon la version et les avertissements,
+  # la CLI Airflow peut écrire son JSON sur plusieurs lignes ou ajouter du texte autour.
   local errors dags runs
-  errors=$(t 90 "${AF[@]}" exec -T airflow-scheduler airflow dags list-import-errors -o json \
-    2>/dev/null | tail -n 1)
-  ! grep -q "scoring_dag" <<<"$errors" || return 1
-  dags=$(t 90 "${AF[@]}" exec -T airflow-scheduler airflow dags list -o json 2>/dev/null |
-    tail -n 1)
+  errors=$(t 90 "${AF[@]}" exec -T airflow-scheduler airflow dags list-import-errors -o json 2>/dev/null)
+  dags=$(t 90 "${AF[@]}" exec -T airflow-scheduler airflow dags list -o json 2>/dev/null)
   runs=$(t 90 "${AF[@]}" exec -T airflow-scheduler airflow dags list-runs scoring_dag \
-    --state success -o json 2>/dev/null | tail -n 1)
-  py - "$dags" "$runs" <<'EOF'
+    --state success -o json 2>/dev/null)
+  py - "$errors" "$dags" "$runs" <<'EOF'
 import json
 import sys
 
-dags = {d["dag_id"]: d for d in json.loads(sys.argv[1] or "[]")}
+
+def last_json(text):
+    """Dernière valeur JSON (liste ou objet) de premier niveau trouvée dans le texte."""
+    dec, i, found = json.JSONDecoder(), 0, None
+    while i < len(text):
+        if text[i] in "[{":
+            try:
+                found, i = dec.raw_decode(text, i)
+                continue
+            except ValueError:
+                pass
+        i += 1
+    return found
+
+
+errors, dags, runs = (last_json(a) for a in sys.argv[1:4])
+assert "scoring_dag" not in json.dumps(errors or []), "erreur d'import sur scoring_dag"
+dags = {d.get("dag_id"): d for d in (dags if isinstance(dags, list) else [])}
 assert "scoring_dag" in dags, "DAG non chargé"
-assert str(dags["scoring_dag"]["is_paused"]) != "True", "DAG en pause"
-assert json.loads(sys.argv[2] or "[]"), "aucun run réussi"
+assert str(dags["scoring_dag"].get("is_paused")).lower() not in ("true", "1"), "DAG en pause"
+assert isinstance(runs, list) and runs, "aucun run réussi"
 EOF
 }
 
