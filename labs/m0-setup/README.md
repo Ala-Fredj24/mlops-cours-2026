@@ -1545,6 +1545,7 @@ repo du cours.
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
+| VM du cours très lente, `vagrant up` en *Timed out while waiting for the machine to boot*, icône « tortue » dans VirtualBox | Hyper-V ou l'intégrité de la mémoire (VBS) actifs sous Windows : VirtualBox passe dans un mode lent (« NEM »). Vérifier : `Select-String -Path "$env:USERPROFILE\VirtualBox VMs\mlops-vm\Logs\VBox.log" -Pattern "fall back to NEM"` (une ligne = mode lent) ; `bcdedit /enum | findstr hypervisorlaunchtype` (PowerShell administrateur) | PowerShell administrateur : `bcdedit /set hypervisorlaunchtype off` ; Sécurité Windows > Sécurité de l'appareil > Isolation du noyau > Intégrité de la mémoire : désactivée ; « Activer ou désactiver des fonctionnalités Windows » : décocher Hyper-V, Plateforme de machine virtuelle, Plateforme de l'hyperviseur Windows ; redémarrer. Cela coupe aussi WSL2, Docker Desktop et le bac à sable Windows. Puis `vagrant up`. |
 | `docker: permission denied` | Utilisateur pas dans le groupe `docker`. | `sudo usermod -aG docker $USER` puis `newgrp docker`. |
 | `kind create cluster` bloque sur « Preparing nodes » | Pas assez de RAM/CPU alloués à Docker Desktop. | Augmenter à 6 Go RAM / 4 CPU dans Settings > Resources. |
 | `Port 80/443 already in use` (ou 30080) | Apache, nginx ou IIS tourne déjà. | `sudo systemctl stop apache2` (ou commenter le mapping dans `infra/kind/kind-config.yaml`). |
