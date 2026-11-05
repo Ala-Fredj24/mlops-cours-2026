@@ -71,7 +71,7 @@ teste un logiciel. Le modèle passe un rapport **Evidently** (métriques avec se
 | Contrat de données | La liste des règles qu'une donnée valide respecte (colonnes, bornes, modalités). |
 | Expectation | Une règle du contrat dans Great Expectations, par exemple « `age` entre 18 et 100 ». |
 | Drift | Les données changent de distribution par rapport à l'entraînement. |
-| p-value (KS, χ²) | La probabilité d'observer un tel écart par hasard : sous 0,05, l'écart est significatif. |
+| p-value (KS, χ²) | La probabilité d'observer un écart au moins aussi grand si rien n'avait changé : sous 0,05, l'écart est jugé significatif. |
 | PSI | La taille du déplacement d'une distribution : sous 0,1 stable, au-delà de 0,25 drift. |
 | Test comportemental | Un test du modèle sur un comportement attendu (invariance, sens d'un effet). |
 | Rapport HTML | La page produite par chaque gate, visible dans l'interface Kubeflow. |
