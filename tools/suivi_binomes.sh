@@ -41,10 +41,10 @@ OUT_CSV="$SUIVI_DIR/rapport-${JALON}-${STAMP}.csv"
 {
   echo "# Suivi des binômes — jalon ${JALON} — $(date '+%Y-%m-%d %H:%M')"
   echo
-  echo "| Groupe | Binôme | Repo | Tag ${JALON} | Pré-contrôle | Échecs | Journal | Labs dans l'historique | Auteurs | Dernier commit |"
-  echo "|---|---|---|---|---|---|---|---|---|---|"
+  echo "| Groupe | Binôme | Repo | Tag ${JALON} | Pré-contrôle | Échecs | Journal | Labs dans l'historique | Auteurs | Commits perso | Branches lab/ext | Dernier commit perso |"
+  echo "|---|---|---|---|---|---|---|---|---|---|---|---|"
 } >"$MD"
-echo "groupe;binome;repo;tag;tag_date;checks_ok;checks_total;echecs;journal;labs;auteurs;dernier_commit" >"$OUT_CSV"
+echo "groupe;binome;repo;tag;tag_date;checks_ok;checks_total;echecs;journal;labs;auteurs;commits_perso;branches;dernier_commit_perso" >"$OUT_CSV"
 
 while IFS=';' read -r groupe binome url || [ -n "${groupe:-}" ]; do
   groupe=$(echo "${groupe:-}" | tr -d '\r')
@@ -64,10 +64,18 @@ while IFS=';' read -r groupe binome url || [ -n "${groupe:-}" ]; do
     ok_clone=$?
   fi
   if [ "$ok_clone" -ne 0 ]; then
-    echo "| ${groupe} | ${binome} | ${url} | — | inaccessible | — | — | — | — | — |" >>"$MD"
-    echo "${groupe};${binome};${url};;;;;;;;;inaccessible" >>"$OUT_CSV"
+    echo "| ${groupe} | ${binome} | ${url} | — | inaccessible | — | — | — | — | — | — | — |" >>"$MD"
+    echo "${groupe};${binome};${url};;;;;;;;;;;inaccessible" >>"$OUT_CSV"
     echo "    repo inaccessible (public ? vous êtes collaborateur ?)"
     continue
+  fi
+
+  # Historique du cours (repo modèle) : exclu des indicateurs, un fork le contient en entier
+  git -C "$dir" fetch -q "$COURS_DIR" "+HEAD:refs/cours/main" 2>/dev/null
+  if git -C "$dir" rev-parse -q --verify refs/cours/main >/dev/null; then
+    not_cours=(--not refs/cours/main)
+  else
+    not_cours=()
   fi
 
   if git -C "$dir" rev-parse -q --verify "refs/tags/${JALON}" >/dev/null; then
@@ -103,19 +111,27 @@ while IFS=';' read -r groupe binome url || [ -n "${groupe:-}" ]; do
   [ -f "$dir/docs/journal.md" ] &&
     journal=$(grep -cE '^## S[0-9]+ — [0-9]{4}-[0-9]{2}-[0-9]{2} — ' "$dir/docs/journal.md" || true)
   # Labs cités dans l'historique (fusions de PR « …/lab/mX-… » ou titres « lab/mX : … »)
-  labs=$(git -C "$dir" log --format=%s "$ref" | grep -oE 'lab/m[0-9]+' | sort -u -V | paste -sd ' ' -)
+  labs=$(git -C "$dir" log --format=%s "$ref" "${not_cours[@]}" | grep -oE 'lab/m[0-9]+' | sort -u -V | paste -sd ' ' -)
   [ -n "$labs" ] || labs="—"
-  auteurs=$(git -C "$dir" log --format=%ae "$ref" | sort -u | grep -vc 'example.invalid')
-  dernier=$(git -C "$dir" log -1 --format=%cd --date=format:'%Y-%m-%d' "origin/HEAD" 2>/dev/null ||
-    git -C "$dir" log -1 --format=%cd --date=format:'%Y-%m-%d')
+  # Auteurs et commits des étudiants seulement (toutes les branches, hors historique du cours)
+  auteurs=$(git -C "$dir" log --remotes=origin --format=%ae "${not_cours[@]}" | sort -u | grep -c .)
+  perso=$(git -C "$dir" rev-list --count --remotes=origin "${not_cours[@]}")
+  branches=$(git -C "$dir" branch -r --format='%(refname:lstrip=3)' | grep -E '^(lab|ext)/' |
+    paste -sd ' ' -)
+  [ -n "$branches" ] || branches="—"
+  dernier=$(git -C "$dir" log -1 --remotes=origin --format=%cd --date=format:'%Y-%m-%d' \
+    "${not_cours[@]}")
+  [ -n "$dernier" ] || dernier="aucun"
 
-  echo "| ${groupe} | ${binome} | [repo](${url}) | ${tag} ${tag_date} | ${okc}/${total} | ${liste} | ${journal} | ${labs} | ${auteurs} | ${dernier} |" >>"$MD"
-  echo "${groupe};${binome};${url};${tag};${tag_date};${okc};${total};${echecs};${journal};${labs};${auteurs};${dernier}" >>"$OUT_CSV"
-  echo "    tag ${JALON} : ${tag} · pré-contrôle ${okc}/${total} · journal ${journal} · labs : ${labs}"
+  echo "| ${groupe} | ${binome} | [repo](${url}) | ${tag} ${tag_date} | ${okc}/${total} | ${liste} | ${journal} | ${labs} | ${auteurs} | ${perso} | ${branches} | ${dernier} |" >>"$MD"
+  echo "${groupe};${binome};${url};${tag};${tag_date};${okc};${total};${echecs};${journal};${labs};${auteurs};${perso};${branches};${dernier}" >>"$OUT_CSV"
+  echo "    tag ${JALON} : ${tag} · pré-contrôle ${okc}/${total} · journal ${journal} · labs : ${labs} · commits perso : ${perso} · branches : ${branches}"
 done <"$CSV"
 
 {
   echo
+  echo "Auteurs, commits perso, branches et dernier commit : travail des étudiants seulement (hors historique"
+  echo "du repo du cours, toutes branches poussées). Labs : fusions lab/mX présentes sur le jalon (ou main)."
   echo "Pré-contrôle lancé avec --sans-cluster : les make check-mX (cluster) ne sont pas rejoués ;"
   echo "le jalon se lit sur le tag s'il existe, sinon sur main. Détail par repo : ${SUIVI_DIR}/journaux/."
 } >>"$MD"
