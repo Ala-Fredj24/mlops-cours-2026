@@ -32,6 +32,50 @@ Evidently, tests comportementaux) avant de l'enregistrer.*
 > - Des **rapports HTML** générés à chaque run et visibles dans l'UI KFP.
 > - La preuve que le pipeline **échoue proprement** sur données corrompues.
 
+## Les notions du lab en 10 minutes (à lire avant de commencer)
+
+Au Lab 2, le pipeline tourne tout seul dans Kubeflow. Mais il fait confiance à tout ce qu'on lui
+donne : si les données sont fausses, il entraîne quand même, et enregistre un mauvais modèle.
+Ce lab ajoute trois **gates** : des étapes de contrôle qui arrêtent le pipeline quand quelque
+chose ne va pas.
+
+![Le Lab 3 en un coup d'œil](img/00-lab3-flux.png)
+
+Un **gate** est une étape comme une autre. S'il échoue, Kubeflow ne lance aucune des étapes qui
+en dépendent : c'est le principe *fail-fast*. Le pipeline du lab en a trois : le contrat des
+données, le drift, et le modèle.
+
+![Les trois gates du pipeline](img/01-gates.png)
+
+Le **contrat de données** dit ce qu'une donnée valide a le droit d'être : les colonnes attendues,
+les bornes, les modalités connues. Avec **Great Expectations**, il devient une suite de règles
+(des *expectations*) générée depuis `dataset.yaml`, versionnée dans Git et vérifiée à chaque run.
+
+![Un contrat de données](img/02-contrat.png)
+
+Le **drift**, c'est quand les nouvelles données ne ressemblent plus à celles de l'entraînement.
+On le mesure colonne par colonne avec deux chiffres : une **p-value** (KS pour les nombres, χ²
+pour les catégories) dit si l'écart est *significatif* ; le **PSI** dit s'il est *important*.
+
+![Le drift](img/03-drift.png)
+
+Enfin, un bon score global ne suffit pas : on teste aussi le **comportement** du modèle, comme on
+teste un logiciel. Le modèle passe un rapport **Evidently** (métriques avec seuils) et des
+**tests comportementaux** pytest avant d'être enregistré.
+
+![Tester le comportement du modèle](img/04-comportement.png)
+
+| Mot | En une phrase |
+|---|---|
+| Gate | Une étape de contrôle : si elle échoue, la suite du pipeline ne tourne pas. |
+| Contrat de données | La liste des règles qu'une donnée valide respecte (colonnes, bornes, modalités). |
+| Expectation | Une règle du contrat dans Great Expectations, par exemple « `age` entre 18 et 100 ». |
+| Drift | Les données changent de distribution par rapport à l'entraînement. |
+| p-value (KS, χ²) | La probabilité d'observer un tel écart par hasard : sous 0,05, l'écart est significatif. |
+| PSI | La taille du déplacement d'une distribution : sous 0,1 stable, au-delà de 0,25 drift. |
+| Test comportemental | Un test du modèle sur un comportement attendu (invariance, sens d'un effet). |
+| Rapport HTML | La page produite par chaque gate, visible dans l'interface Kubeflow. |
+
 ## Architecture cible
 
 ```text
@@ -72,7 +116,19 @@ modèle à partir de données ou d'un modèle qui ne respectent pas le contrat.
 > `dvc repro` si le remote DVC de votre cluster ne les a jamais reçus (second membre du binôme,
 > nouveau poste : voir le Lab 1, étape 10.4).
 
-Au début de chaque séance :
+> [!IMPORTANT]
+> **Une fois, avant ce lab : mises à jour du cours et mémoire**
+> Si ce n'est pas déjà fait au Lab 2, récupérez les mises à jour du cours (premier run Kubeflow
+> plus rapide, `make pf` et `make check-mX` plus fiables), dans la VM :
+> `git fetch upstream && git checkout upstream/main -- Makefile infra/airflow labs`, puis
+> `git commit -m "Mise à jour du cours"`. Ce lab n'utilise pas Airflow : arrêtez-le pour libérer
+> environ 4 Go, `(cd infra/airflow && docker compose down)`. Sous Windows, vérifiez que
+> VirtualBox n'est pas en mode lent (dépannage du Lab 0, ligne « VM du cours très lente ») :
+> `Select-String -Path "$env:USERPROFILE\VirtualBox VMs\mlops-vm\Logs\VBox.log" -Pattern "fall back to NEM"`
+> ne doit rien afficher.
+
+Au début de chaque séance, sous Windows, démarrez d'abord la VM dans **PowerShell**, dossier
+`infra\vagrant` : `vagrant up`, puis `vagrant ssh`. Puis, dans la VM :
 
 ```bash
 cd ~/mlops-cours-2026
@@ -83,6 +139,11 @@ set -a && source .env && set +a
 dvc pull                   # données et modèle du Lab 1 s'ils manquent (remote vide : dvc repro)
 make kfp-ui                # UI et API KFP sur http://localhost:8080 (comme au Lab 2)
 ```
+
+Si `kubectl get nodes` échoue après le redémarrage de la VM :
+`docker start mlops-lab-control-plane mlops-lab-worker mlops-lab-worker2 kind-registry`, attendez
+une minute et recommencez. Si l'interface Kubeflow (`localhost:8080`) ou MLflow
+(`localhost:5000`) cesse de répondre pendant la séance, relancez `make kfp-ui` ou `make pf`.
 
 Dans un **nouveau terminal** de la même séance, seules les deux lignes `source .venv/bin/activate`
 et `set -a && source .env && set +a` sont nécessaires (après `cd ~/mlops-cours-2026`) : les
@@ -810,12 +871,13 @@ grep -n "scoring-pipeline:" pipelines/components.py dags/scoring_dag.py
 docker build -f pipelines/Dockerfile --build-arg VERSION=1.1.0 \
     -t localhost:5001/scoring-pipeline:1.1.0 .
 docker push localhost:5001/scoring-pipeline:1.1.0
+kind load docker-image --name mlops-lab localhost:5001/scoring-pipeline:1.1.0   # copie dans les nœuds
 docker run --rm localhost:5001/scoring-pipeline:1.1.0 python -c \
     "import great_expectations as gx, evidently; print(gx.__version__, evidently.__version__)"
 docker run --rm localhost:5001/scoring-pipeline:1.1.0 ls gx
 ```
 
-> **Sortie attendue :** les deux lignes `grep` affichent `scoring-pipeline:1.1.0`. Le build
+> **Sortie attendue :** les deux lignes `grep` affichent `scoring-pipeline:1.1.0`. `kind load` copie l'image dans les trois nœuds du cluster : sans lui, chaque nœud la télécharge au premier run (plusieurs minutes par nœud). Le build
 > prend 2 à 3 minutes (nouvelles dépendances). Puis `1.23.2 0.7.23`, et `checkpoints`,
 > `expectations`, `great_expectations.yml`, `plugins`, `validation_definitions` (pas
 > d'`uncommitted`). L'image passe d'environ 650 Mo à environ 950 Mo : GX et Evidently
@@ -1969,6 +2031,7 @@ sed -i 's/scoring-pipeline:1.1.0/scoring-pipeline:1.2.0/' \
 docker build -f pipelines/Dockerfile --build-arg VERSION=1.2.0 \
     -t localhost:5001/scoring-pipeline:1.2.0 .
 docker push localhost:5001/scoring-pipeline:1.2.0
+kind load docker-image --name mlops-lab localhost:5001/scoring-pipeline:1.2.0   # copie dans les nœuds
 python -m pipelines.scoring_pipeline
 python -m pipelines.drift_demo
 grep -c "image: localhost:5001/scoring-pipeline:1.2.0" scoring_pipeline.yaml
@@ -1998,7 +2061,7 @@ Dans l'UI KFP :
 > run = client.create_run_from_pipeline_package(
 >     "drift_demo.yaml", experiment_name="scoring", run_name="drift-demo-cli"
 > )
-> print(client.wait_for_run_completion(run.run_id, timeout=1800).state)
+> print(client.wait_for_run_completion(run.run_id, timeout=3600).state)
 > EOF
 > ```
 
@@ -2124,7 +2187,7 @@ l'approuve ; vous la fusionnez, puis vous revenez sur `main` : `git switch main 
 > client = kfp.Client(host="http://localhost:8080")
 > for package in ("scoring_pipeline.yaml", "test_bad_data.yaml", "drift_demo.yaml"):
 >     run = client.create_run_from_pipeline_package(package, experiment_name="scoring")
->     print(package, client.wait_for_run_completion(run.run_id, timeout=1800).state)
+>     print(package, client.wait_for_run_completion(run.run_id, timeout=3600).state)
 > EOF
 > make check-m3
 > ```
@@ -2132,6 +2195,22 @@ l'approuve ; vous la fusionnez, puis vous revenez sur `main` : `git switch main 
 > `test_bad_data.yaml` doit finir en `FAILED` (le gate bloque les données corrompues), les deux
 > autres en `SUCCEEDED`. Ne commitez rien de régénéré : les YAML compilés et les rapports sont
 > ignorés, `dvc.lock` reste modifié en local (Lab 1).
+
+## Lien avec le mini-projet
+
+- **Jalon J0 (passé)** : si votre tag `j0` n'est pas encore posé, faites-le maintenant
+  (`make check-m10 JALON=j0`, puis `git tag -a j0 -m "J0 Setup" && git push origin j0`).
+- **Extensions : déclaration au plus tard à la fin de la séance du Module 4** (la prochaine).
+  Lisez le catalogue du guide du mini-projet (`labs/m10-capstone/README.md`, section
+  « L'extension personnelle »), choisissez-en une par étudiant (deux extensions différentes
+  dans un binôme), puis ouvrez l'issue « Mini-projet : déclarer mon extension » sur le repo du
+  cours. Plusieurs extensions prolongent directement ce lab : `tests-comportementaux`,
+  `gate-equite`, `drift-predictions`.
+- **Journal de bord** (`docs/journal.md`) : une entrée pour cette séance.
+- **ADR conseillé** : les seuils de vos gates (p-value 0,05, PSI 0,25, 10 % des colonnes,
+  ROC AUC 0,70) et ce qu'ils protègent pour votre cas d'usage.
+- **Dataset libre** : relisez votre suite `gx/` régénérée et réécrivez `tests/behavior.yaml` et
+  le scénario `drift.simulation` de `params.yaml` (encadré de l'étape 6.4).
 
 ## Checklist de validation
 
@@ -2167,6 +2246,9 @@ l'approuve ; vous la fusionnez, puis vous revenez sur `main` : `git switch main 
 
 | Symptôme | Cause probable | Solution |
 |---|---|---|
+| Run Kubeflow très long (plus de 20 min), étapes qui attendent | Image du pipeline téléchargée par chaque nœud ; Airflow encore lancé ; VM en mode lent (Hyper-V). | `kind load docker-image --name mlops-lab localhost:5001/scoring-pipeline:<tag>` (étapes 2.3 et 6.4) ; `(cd infra/airflow && docker compose down)` ; vérification Hyper-V du Lab 0. |
+| `Connection reset by peer` ou page blanche sur `localhost:8080` | Le port-forward de l'interface Kubeflow s'est arrêté ; le run, lui, continue dans le cluster. | `make kfp-ui`, puis recharger la page ; `kubectl -n kubeflow get workflows` pour l'état des runs. |
+| `MLflow : …/health` en échec dans `make check-m3`, ou `register-model` qui ne trouve pas MLflow depuis le poste | Port-forward MLflow arrêté (redémarrage de la VM). | `make pf` (il attend que MLflow soit prêt), puis `curl -s localhost:5000/health`. |
 | `import great_expectations` très lent | GX 1.x s'importe en 3 s environ. Pas un bug. | Normal. Juste attendre. |
 | `AttributeError: … has no attribute 'sources'` (ou `add_or_update_expectation_suite`, `run_checkpoint`) | Code écrit pour GX 0.x. | API 1.x : `context.data_sources`, `context.suites`, `ValidationDefinition`, `Checkpoint.run()` (tableau de 1.1). |
 | `DataContextRequiredError` en construisant une suite | GX 1.x exige un contexte actif pour `suite.add_expectation()`. | Appeler `gx.get_context()` d'abord (comme `save_suite`, qui crée la suite après le contexte). |
