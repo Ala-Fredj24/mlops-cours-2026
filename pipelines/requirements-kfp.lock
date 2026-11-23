@@ -1,0 +1,4 @@
+# Fichier : pipelines/requirements-kfp.lock
+# kfp installé sans ses dépendances (voir pipelines/Dockerfile), version et hash figés.
+kfp==2.17.0 \
+    --hash=sha256:dff321b76b2be8a09748a1be805a88699b4919e13bb6a1bf67ebf3074ea8ce3f
