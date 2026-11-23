@@ -20,7 +20,7 @@ from kfp.dsl import Artifact, ClassificationMetrics, Dataset, Input, Metrics, Mo
 # Surcharge possible à la compilation : PIPELINE_IMAGE=… python -m pipelines.scoring_pipeline
 PIPELINE_IMAGE = os.getenv("PIPELINE_IMAGE", "localhost:5001/scoring-pipeline:1.0.0")
 # Serveur MLflow du cours vu depuis un pod (DNS interne <service>.<namespace>)
-MLFLOW_URI = "http://mlflow.mlflow:5000"
+MLFLOW_URI = "http://mlflow.mlflow:5000"  # NOSONAR trafic interne au cluster, sans TLS dans kind
 
 
 @dsl.component(base_image=PIPELINE_IMAGE, install_kfp_package=False)

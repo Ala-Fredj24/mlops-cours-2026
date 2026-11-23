@@ -7,6 +7,8 @@
 !params.yaml
 !src/
 !pipelines/requirements.txt
+!pipelines/requirements.lock
+!pipelines/requirements-kfp.lock
 !pipelines/__init__.py
 !pipelines/stage.py
 **/__pycache__

@@ -28,6 +28,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]  # racine du projet (/app dans l'image)
 OUTPUT_DIRS = ("data", "models", "reports")  # là où les étapes écrivent leurs sorties
 XCOM_FILE = Path("/airflow/xcom/return.json")  # lu par le KubernetesPodOperator
+S3_SCHEME = "s3://"
+# Seules les étapes du projet peuvent être lancées (python -m <module>)
+MODULES = (
+    "src.download",
+    "src.validate_data",
+    "src.prepare",
+    "src.train",
+    "src.evaluate",
+    "src.promote",
+)
+SAFE_ARG = re.compile(r"[A-Za-z0-9_.:=/-]+")  # arguments d'étape : options et valeurs simples
+RUN_ID = re.compile(r"[0-9a-f]{32}")  # identifiant de run MLflow
 
 
 def copy(src: str | Path, dst: str | Path) -> None:
@@ -47,7 +59,13 @@ def execute(module: str, args, workdir: Path, env: dict | None = None) -> None:
     run_env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(ROOT), os.getenv("PYTHONPATH")]))
     config = Path(os.getenv("DATASET_CONFIG", ROOT / "dataset.yaml")).resolve()
     run_env["DATASET_CONFIG"] = str(config)
-    cmd = [sys.executable, "-m", module, *map(str, args)]
+    if module not in MODULES:
+        raise ValueError(f"étape inconnue : {module!r} (attendu : {', '.join(MODULES)})")
+    args = [str(a) for a in args]
+    unsafe = [a for a in args if not SAFE_ARG.fullmatch(a)]
+    if unsafe:
+        raise ValueError(f"arguments refusés : {unsafe}")
+    cmd = [sys.executable, "-m", MODULES[MODULES.index(module)], *args]
     print("+", " ".join(cmd), flush=True)
     subprocess.run(cmd, cwd=workdir, env=run_env, check=True)
 
@@ -73,14 +91,14 @@ def _s3(workspace: str):
     """Client S3 (endpoint et identifiants lus dans l'environnement), bucket, préfixe."""
     import boto3
 
-    bucket, _, prefix = workspace.removeprefix("s3://").partition("/")
+    bucket, _, prefix = workspace.removeprefix(S3_SCHEME).partition("/")
     prefix = re.sub(r"[^A-Za-z0-9._/-]", "_", prefix).strip("/")  # run_id Airflow : « : + »
     return boto3.client("s3"), bucket, prefix
 
 
 def pull(workspace: str, work: Path) -> None:
     """Récupère les sorties des étapes précédentes du run."""
-    if not workspace.startswith("s3://"):
+    if not workspace.startswith(S3_SCHEME):
         if Path(workspace).is_dir():
             copy(workspace, work)
         return
@@ -89,7 +107,9 @@ def pull(workspace: str, work: Path) -> None:
         s3.create_bucket(Bucket=bucket)  # premier run : le bucket n'existe pas encore
     for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=f"{prefix}/"):
         for obj in page.get("Contents", []):
-            target = work / obj["Key"].removeprefix(f"{prefix}/")
+            target = (work / obj["Key"].removeprefix(f"{prefix}/")).resolve()
+            if not target.is_relative_to(work.resolve()):
+                raise ValueError(f"clé S3 hors du dossier de travail : {obj['Key']}")
             target.parent.mkdir(parents=True, exist_ok=True)
             s3.download_file(bucket, obj["Key"], str(target))
 
@@ -104,7 +124,7 @@ def snapshot(work: Path) -> dict[Path, int]:
 def push(work: Path, workspace: str, before: dict[Path, int]) -> None:
     """Publie les fichiers créés ou modifiés par l'étape."""
     changed = [p for p, mtime in snapshot(work).items() if before.get(p) != mtime]
-    if workspace.startswith("s3://"):
+    if workspace.startswith(S3_SCHEME):
         s3, bucket, prefix = _s3(workspace)
         for p in changed:
             s3.upload_file(str(p), bucket, f"{prefix}/{p.relative_to(work).as_posix()}")
@@ -114,6 +134,17 @@ def push(work: Path, workspace: str, before: dict[Path, int]) -> None:
     print(f"{len(changed)} fichier(s) publié(s) dans {workspace}", flush=True)
 
 
+def _numbers(data: dict) -> dict:
+    """Garde uniquement les valeurs numériques (et les sous-dictionnaires, ex. confusion)."""
+    clean = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            clean[str(key)] = _numbers(value)
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            clean[str(key)] = float(value)
+    return clean
+
+
 def xcom_summary(work: Path) -> dict:
     """Petites valeurs pour les tasks suivantes : run MLflow du modèle, métriques."""
     from mlflow.models import Model
@@ -121,11 +152,17 @@ def xcom_summary(work: Path) -> dict:
     from src.evaluate import METRICS_JSON
     from src.train import MODEL_DIR
 
+    # Les valeurs lues dans les fichiers sont revalidées avant d'être publiées en XCom :
+    # un identifiant de run au bon format, et des métriques numériques uniquement.
     summary = {}
     if (work / MODEL_DIR / "MLmodel").exists():
-        summary["mlflow_run_id"] = Model.load(work / MODEL_DIR).metadata["mlflow_run_id"]
+        run_id = str(Model.load(work / MODEL_DIR).metadata["mlflow_run_id"])
+        if not RUN_ID.fullmatch(run_id):
+            raise ValueError(f"identifiant de run MLflow invalide : {run_id!r}")
+        summary["mlflow_run_id"] = run_id
     if (work / METRICS_JSON).exists():
-        summary["metrics"] = json.loads((work / METRICS_JSON).read_text())
+        metrics = json.loads((work / METRICS_JSON).read_text())
+        summary["metrics"] = _numbers(metrics)
     return summary
 
 
@@ -133,7 +170,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Exécute une étape du projet (task Airflow)", allow_abbrev=False
     )
-    parser.add_argument("module", help="étape à lancer, ex. src.prepare")
+    parser.add_argument("module", choices=MODULES, help="étape à lancer, ex. src.prepare")
     parser.add_argument("--workspace", required=True, help="s3://bucket/préfixe ou dossier")
     parser.add_argument("--xcom", action="store_true", help=f"résumé écrit dans {XCOM_FILE}")
     opts, args = parser.parse_known_args()

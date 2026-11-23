@@ -40,15 +40,15 @@ def scoring_pipeline(
     mlflow_uri: str = MLFLOW_URI,
 ):
     # Source externe (réseau) : 3 nouvelles tentatives, et jamais plus de 10 min
-    ingest_task = ingest_data()
+    ingest_task = ingest_data()  # NOSONAR tâche KFP
     ingest_task.set_retry(num_retries=3, backoff_duration="30s")
     ingest_task.set_cpu_limit("500m").set_memory_limit("512Mi")
     kubernetes.set_timeout(ingest_task, 600)
 
-    validate_task = validate_data(raw_data=ingest_task.outputs["raw_data"])
+    validate_task = validate_data(raw_data=ingest_task.outputs["raw_data"])  # NOSONAR tâche KFP
     validate_task.set_memory_limit("512Mi")
 
-    prep_task = prepare_features(raw_data=ingest_task.outputs["raw_data"])
+    prep_task = prepare_features(raw_data=ingest_task.outputs["raw_data"])  # NOSONAR tâche KFP
     prep_task.after(validate_task)  # gate : pas de préparation sans validation réussie
     prep_task.set_memory_limit("1Gi")
 
